@@ -1,6 +1,7 @@
 "use strict";
 
 var Service, Characteristic, HomebridgeAPI;
+const { PackageVersion } = require('./package.json');
 
 module.exports = function(homebridge) {
 	Service = homebridge.hap.Service;
@@ -48,16 +49,37 @@ const RandomizeCharacteristic = function() {
 };
 RandomizeCharacteristic.UUID = RandomizeUUID;
 
+const ResetUUID = 'DC9A98D7-50A5-4C44-A9EA-49219937F0CC';
+const ResetCharacteristic = function() {
+	const char = new Characteristic('Reset', ResetUUID);
+	char.setProps({
+		format: Characteristic.Formats.BOOL,
+		perms: [Characteristic.Perms.PAIRED_READ, Characteristic.Perms.PAIRED_WRITE, Characteristic.Perms.NOTIFY]
+	});
+	char.value = char.getDefaultValue();
+	return char;
+};
+ResetCharacteristic.UUID = ResetUUID;
+
 function IndexCounter(log, config) {
 	this.log = log;
 	this.name = config.name;
 	this.max = config.max;
 	this.delay = config.delay;
 	this.randomizeAfterDelay = config.randomizeAfterDelay;
+	this.resetAfterDelay = config.resetAfterDelay;
+	this.timeouts = []
 	this._service = new Service.Switch(this.name);
 	this.cacheDirectory = HomebridgeAPI.user.persistPath();
 	this.storage = require('node-persist');
 	this.storage.initSync({dir:this.cacheDirectory, forgiveParseErrors: true});
+
+	this.informationService = new Service.AccessoryInformation();
+	this.informationService
+		.setCharacteristic(Characteristic.Manufacturer, 'Homebridge')
+		.setCharacteristic(Characteristic.Model, 'Index Counter')
+		.setCharacteristic(Characteristic.FirmwareRevision, PackageVersion)
+		.setCharacteristic(Characteristic.SerialNumber, 'IndexCounter-' + this.name.replace(/\s/g, '-'));
 
 	this._service.addCharacteristic(IndexCharacteristic);
 	this._service.getCharacteristic('Index').setProps({
@@ -74,6 +96,9 @@ function IndexCounter(log, config) {
 	this._service.addCharacteristic(RandomizeCharacteristic);
 	this._service.getCharacteristic('Randomize').on('set', this._setRandomize.bind(this));
 
+	this._service.addCharacteristic(ResetCharacteristic);
+	this._service.getCharacteristic('Reset').on('set', this._setReset.bind(this));
+
 	var cachedState = this.storage.getItemSync(this.name);
 	if((cachedState === undefined) || (cachedState === false)) {
 		this._service.setCharacteristic('Index', 0);
@@ -83,7 +108,7 @@ function IndexCounter(log, config) {
 }
 
 IndexCounter.prototype.getServices = function() {
-	return [this._service];
+	return [this.informationService, this._service];
 }
 
 IndexCounter.prototype._setCurrentIndex = function(index, callback) {
@@ -91,12 +116,22 @@ IndexCounter.prototype._setCurrentIndex = function(index, callback) {
 	this.storage.setItemSync(this.name, index);
 
 	if (this.randomizeAfterDelay) {
-		setTimeout(function() {
+		this._clearTimeouts()
+		this.log("Will randomize in " + this.delay + " ms");
+		this.timeouts.push(setTimeout(function() {
 			this.randomizeAfterDelay = false;
 			let newRand = Math.floor(Math.random() * (this.max + 1));
 			this._service.setCharacteristic('Index', newRand);
 			this.randomizeAfterDelay = true;
-		}.bind(this), this.delay);
+		}.bind(this), this.delay));
+	} else if (index > 0 && this.resetAfterDelay) {
+		this._clearTimeouts()
+		this.log("Will reset in " + this.delay + " ms");
+		this.timeouts.push(setTimeout(function() {
+			this.resetAfterDelay = false;
+			this._service.setCharacteristic('Index', 0);
+			this.resetAfterDelay = true;
+		}.bind(this), this.delay));
 	}
 
   	callback();
@@ -133,4 +168,23 @@ IndexCounter.prototype._setRandomize = function(on, callback) {
 		}.bind(this), 500);
 	}
 	callback();
+}
+
+IndexCounter.prototype._setReset = function(on, callback) {
+	if (on) {
+		this.log("Resetting");
+
+		this._service.setCharacteristic('Index', 0);
+		setTimeout(function() {
+			this._service.setCharacteristic('Reset', false);
+		}.bind(this), 500);
+	}
+  	callback();
+}
+
+IndexCounter.prototype._clearTimeouts = function() {
+	while (this.timeouts.length) {
+		let timeout = this.timeouts.pop()
+		clearTimeout(timeout);
+	}
 }

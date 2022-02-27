@@ -20,13 +20,19 @@
                 "title": "Randomize After Delay?",
                 "type": "boolean",
                 "default": true,
-                "description": "If set, the counter will pick a new random number after the specified delay."
+                "description": "If set, the counter will pick a new random number after the specified delay (takes precedence over Reset After Delay)."
+            },
+            "resetAfterDelay": {
+                "title": "Reset After Delay?",
+                "type": "boolean",
+                "default": false,
+                "description": "If set, the counter will be reset to 0 after the specified delay (Randomize After Delay must be false)."
             },
             "delay": {
                 "title": "Delay",
                 "type": "number",
                 "default": 300000,
-                "description": "How long after the index is changed to randomize, in milliseconds."
+                "description": "How long after the index is changed to randomize or reset, in milliseconds."
             }
         }
     }
